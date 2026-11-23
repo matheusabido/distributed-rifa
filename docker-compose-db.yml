@@ -6,6 +6,9 @@ services:
     environment:
       POSTGRES_PASSWORD: teste
       PGPASSWORD: teste
+      MY_HOST: ${MY_HOST}
+      PEER_HOST: ${PEER_HOST}
+      INITIAL_MASTER: ${INITIAL_MASTER}
     command: ["-c", "config_file=/etc/postgresql/postgresql.conf"]
     ports:
       - ${DB_PORT:-5432}:5432
