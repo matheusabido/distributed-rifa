@@ -1,0 +1,52 @@
+.mobile-checkout-bar {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .mobile-checkout-bar {
+    position: fixed;
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 10px 10px 17px;
+    border: 1px solid rgba(255, 255, 255, .18);
+    border-radius: 18px;
+    color: white;
+    background: rgba(7, 53, 100, .96);
+    box-shadow: 0 12px 38px rgba(0, 36, 77, .34);
+    backdrop-filter: blur(14px);
+  }
+
+  .mobile-checkout-bar small,
+  .mobile-checkout-bar strong {
+    display: block;
+  }
+
+  .mobile-checkout-bar small {
+    color: #a9c9e5;
+    font-size: .68rem;
+  }
+
+  .mobile-checkout-bar strong {
+    margin-top: 2px;
+    font-family: 'Nunito', sans-serif;
+    font-size: 1.13rem;
+  }
+
+  .mobile-checkout-bar button {
+    min-height: 46px;
+    padding: 0 20px;
+    border: 0;
+    border-radius: 13px;
+    color: #0b5eb4;
+    background: white;
+    font: inherit;
+    font-size: .83rem;
+    font-weight: 800;
+  }
+}

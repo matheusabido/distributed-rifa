@@ -1,0 +1,130 @@
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: rgba(255, 255, 255, .92);
+  border-bottom: 1px solid rgba(18, 70, 127, .1);
+  backdrop-filter: blur(16px);
+}
+
+.header__content {
+  min-height: 74px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  color: #12385f;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.1;
+  text-decoration: none;
+}
+
+.brand small {
+  display: block;
+  margin-top: 4px;
+  color: #66809b;
+  font-size: .69rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+
+.brand__mark {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 13px 13px 13px 5px;
+  color: white;
+  background: linear-gradient(145deg, #2388ed, #0b58b8);
+  box-shadow: 0 7px 16px rgba(10, 91, 183, .22);
+  font-family: 'Nunito', sans-serif;
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+.header nav {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.header nav a {
+  color: #47637f;
+  font-size: .91rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: color .2s ease;
+}
+
+.header nav a:hover {
+  color: #0b65c7;
+}
+
+.header__cart {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 14px;
+  border: 1px solid #d6e7f6;
+  border-radius: 13px;
+  color: #175b9e;
+  background: #eff8ff;
+  font: inherit;
+  font-size: .84rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.header__cart b {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: white;
+  background: #1474d4;
+  font-size: .76rem;
+}
+
+.header__cart:disabled {
+  opacity: .62;
+  cursor: default;
+}
+
+@media (max-width: 720px) {
+  .header__content {
+    min-height: 66px;
+  }
+
+  .header nav {
+    display: none;
+  }
+
+  .brand small {
+    display: none;
+  }
+
+  .brand__mark {
+    width: 36px;
+    height: 36px;
+    font-size: 1.15rem;
+  }
+
+  .header__cart span {
+    display: none;
+  }
+
+  .header__cart {
+    padding: 0 9px;
+    min-height: 40px;
+  }
+}
