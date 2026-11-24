@@ -12,11 +12,29 @@ check_peer() {
     [ "$r" = "f" ]
 }
 
-log "starting $MY_HOST, connecting to $PEER_HOST"
+copy_from_peer() {
+    gosu postgres pg_basebackup -h "$PEER_HOST" -U replicator -D "$PGDATA" -X stream -R
+}
 
-peer_state=0
-check_peer || peer_state=$?
+log "setting up file system"
 
-log "peer state: $peer_state"
+mkdir -p "$PGDATA"
+chown postgres:postgres "$PGDATA"
+chmod 700 "$PGDATA"
+
+if [ ! -s "$PGDATA/PG_VERSION" ]; then
+    if [ "$MY_HOST" = "$INITIAL_MASTER" ]; then
+        log "empty disk and initial master: creating new db instance"
+    else
+        until check_peer; do
+            log "waiting for $PEER_HOST to be a master before setting up db"
+            sleep 2
+        done
+        log "empty disk and replica, copying from master"
+        copy_from_peer
+    fi
+else
+    log "environment is already set up"
+fi
 
 exec docker-entrypoint.sh postgres "$@"
