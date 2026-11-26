@@ -156,7 +156,7 @@ func (m *Monitor) followerCheck(ctx context.Context) {
 		m.elect(ctx)
 		return
 	}
-	if m.pingAPI(ctx, p) == Up {
+	if st, _ := m.pingAPI(ctx, p); st == Up {
 		m.apply(p.name, Up, m.selfID)
 		return
 	}
@@ -179,10 +179,17 @@ func (m *Monitor) masterCheck(ctx context.Context) {
 		go func(p peerAPI) {
 			defer wg.Done()
 			old := m.stateOf(p.name)
-			st := m.pingAPI(ctx, p)
+			st, theirMaster := m.pingAPI(ctx, p)
 			m.apply(p.name, st, m.selfID)
-			if st == Up && old != Up {
+			switch {
+			case st == Up && old != Up:
 				// API que (re)apareceu: conto quem é a mestre e o estado atual.
+				go m.sendSnapshot(p)
+			case st == Up && theirMaster != m.selfID:
+				// Ela acha que a mestre é outra (ex: não ouviu o meu anúncio).
+				// Me anuncio de novo; se eu não tiver prioridade, ela puxa
+				// uma eleição.
+				log.Printf("[eleição] %s acha que a mestre é a api%d: me anuncio de novo", p.name, theirMaster)
 				go m.sendSnapshot(p)
 			}
 		}(p)
@@ -201,15 +208,17 @@ func (m *Monitor) masterCheck(ctx context.Context) {
 	}
 }
 
-func (m *Monitor) pingAPI(ctx context.Context, p peerAPI) string {
+// pingAPI devolve se a API respondeu e quem ELA acha que é a mestre.
+func (m *Monitor) pingAPI(ctx context.Context, p peerAPI) (state string, theirMaster int) {
 	ctx, cancel := context.WithTimeout(ctx, checkTimeout)
 	defer cancel()
 	// WaitForReady: se a conexão está reconectando, espera (até o timeout)
 	// em vez de falhar na hora.
-	if _, err := p.client.Ping(ctx, &rifapb.PingRequest{FromId: int32(m.selfID)}, grpc.WaitForReady(true)); err != nil {
-		return Down
+	resp, err := p.client.Ping(ctx, &rifapb.PingRequest{FromId: int32(m.selfID)}, grpc.WaitForReady(true))
+	if err != nil {
+		return Down, 0
 	}
-	return Up
+	return Up, int(resp.MasterId)
 }
 
 // checkDB abre uma conexão direta com UM banco e pergunta se ele está em
