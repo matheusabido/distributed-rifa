@@ -5,8 +5,9 @@ services:
     container_name: ${CONTAINER_NAME:-rifa-pg}
     restart: unless-stopped
     environment:
-      POSTGRES_PASSWORD: teste
-      PGPASSWORD: teste
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-teste}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-teste}
+      POSTGRES_DB: ${DB_NAME:-rifa}
       MY_HOST: ${MY_HOST}
       PEER_HOST: ${PEER_HOST}
       INITIAL_MASTER: ${INITIAL_MASTER}
