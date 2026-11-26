@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { formatNumber } from '../raffle.js'
 
-export default function RaffleSection({ total, sold, isOpen, onSelect }) {
+export default function RaffleSection({ total, sold, selected, isOpen, onToggle }) {
   const [onlyAvailable, setOnlyAvailable] = useState(false)
   const [page, setPage] = useState(1)
   const pageCount = Math.ceil(total / 100)
@@ -18,7 +18,7 @@ export default function RaffleSection({ total, sold, isOpen, onSelect }) {
       <div className="section-heading">
         <div>
           <h2 id="raffle-title">Números da rifa</h2>
-          <p>{isOpen ? 'Toque em um número disponível para comprar.' : 'Esta rifa está fora do período de compras.'}</p>
+          <p>{isOpen ? 'Toque nos números disponíveis para selecionar e depois em Comprar.' : 'Esta rifa está fora do período de compras.'}</p>
         </div>
         {isOpen && (
           <div className="filter-control" role="group" aria-label="Filtrar números">
@@ -44,7 +44,8 @@ export default function RaffleSection({ total, sold, isOpen, onSelect }) {
 
       <div className="number-legend">
         <span><i className="legend-dot legend-dot--available" />{isOpen ? 'Disponível' : 'Não vendido'}</span>
-        <span><i className="legend-dot legend-dot--reserved" />Vendido</span>
+        {isOpen && <span><i className="legend-dot legend-dot--selected" />Selecionado</span>}
+        <span><i className="legend-dot legend-dot--sold" />Vendido</span>
       </div>
 
       {pageCount > 1 && (
@@ -75,16 +76,19 @@ export default function RaffleSection({ total, sold, isOpen, onSelect }) {
         <div className="number-grid" role="group" aria-label="Números da rifa">
           {visible.map((number) => {
             const isSold = sold.has(number)
-            const status = isSold ? 'vendido' : isOpen ? 'disponível' : 'não vendido'
+            const isSelected = !isSold && selected.has(number)
+            const status = isSold ? 'vendido' : isSelected ? 'selecionado' : isOpen ? 'disponível' : 'não vendido'
+            const className = ['number-button', isSold && 'sold', isSelected && 'selected'].filter(Boolean).join(' ')
 
             return (
               <button
                 key={number}
                 type="button"
-                className={isSold ? 'number-button reserved' : 'number-button'}
+                className={className}
                 disabled={!isOpen || isSold}
                 aria-label={`Número ${number}, ${status}`}
-                onClick={() => onSelect(number)}
+                aria-pressed={isOpen && !isSold ? isSelected : undefined}
+                onClick={() => onToggle(number)}
               >
                 {formatNumber(number)}
               </button>

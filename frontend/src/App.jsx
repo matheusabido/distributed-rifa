@@ -61,7 +61,7 @@ export default function App() {
   let page = <CatalogPage />
 
   if (raffleId) {
-    page = <RafflePage key={raffleId} raffleId={raffleId} />
+    page = <RafflePage key={raffleId} raffleId={raffleId} accountEmail={session?.email} />
   } else if (route === '/minhas-rifas') {
     page = session ? (
       <MyRafflesPage key={session.usuario_id} token={session.token} onUnauthorized={expireSession} />

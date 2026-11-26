@@ -67,8 +67,14 @@
   background: white;
 }
 
-.legend-dot--reserved {
-  background: #dce4eb;
+.legend-dot--selected {
+  border-color: #d9a400;
+  background: #ffd23f;
+}
+
+.legend-dot--sold {
+  border-color: #1e8a4c;
+  background: #2fb36a;
 }
 
 .number-grid {
@@ -100,11 +106,59 @@
   cursor: not-allowed;
 }
 
-.number-button.reserved {
-  border-color: #d2dde7;
-  color: #4d6275;
-  background: #e6ecf1;
-  text-decoration: line-through;
+.number-button.selected,
+.number-button.selected:hover:not(:disabled) {
+  border-color: #d9a400;
+  color: #4a3700;
+  background: #ffd23f;
+}
+
+.number-button.sold {
+  border-color: #1e8a4c;
+  color: white;
+  background: #2fb36a;
+}
+
+.selection-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  padding-block: 12px;
+  border-top: 1px solid #d8e7f4;
+  background: white;
+  box-shadow: 0 -6px 18px rgb(8 43 86 / 10%);
+}
+
+.selection-bar__content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #12385f;
+}
+
+.selection-bar__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.buyer-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  color: #075cb6;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 @media (max-width: 480px) {

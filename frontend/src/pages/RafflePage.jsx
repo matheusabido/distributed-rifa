@@ -7,14 +7,24 @@ import useApiResource from '../hooks/useApiResource.js'
 import useRaffleEvents from '../hooks/useRaffleEvents.js'
 import { formatCurrency, formatNumber } from '../raffle.js'
 
-export default function RafflePage({ raffleId }) {
+export default function RafflePage({ raffleId, accountEmail }) {
   const { data, error, reload } = useApiResource(`/rifas/${raffleId}`)
-  const [selected, setSelected] = useState(null)
+  const [selected, setSelected] = useState([])
+  const [checkoutOpen, setCheckoutOpen] = useState(false)
   const [liveSold, setLiveSold] = useState([])
   const [winner, setWinner] = useState(null)
 
-  function markSold(number) {
-    if (number != null) setLiveSold((current) => [...new Set([...current, Number(number)])])
+  function markSold(numbers) {
+    const list = [numbers].flat().filter((number) => number != null).map(Number)
+    if (list.length === 0) return
+    setLiveSold((current) => [...new Set([...current, ...list])])
+    setSelected((current) => current.filter((number) => !list.includes(number)))
+  }
+
+  function toggleSelected(number) {
+    setSelected((current) =>
+      current.includes(number) ? current.filter((item) => item !== number) : [...current, number],
+    )
   }
 
   useRaffleEvents((event) => {
@@ -49,9 +59,8 @@ export default function RafflePage({ raffleId }) {
   const sold = new Set([...(data.vendidos || []).map((ticket) => Number(ticket.numero)), ...liveSold])
   const winnerNumber = winner?.numero ?? raffle.numero_sorteado
   const isOpen = raffle.status === 'open' && winnerNumber == null
-  const unavailable = sold.has(selected)
-    ? 'Este número já foi vendido.'
-    : !isOpen ? 'Esta rifa não está aberta para compras.' : ''
+  const selection = isOpen ? selected.filter((number) => !sold.has(number)) : []
+  const unavailable = !isOpen ? 'Esta rifa não está aberta para compras.' : ''
 
   return (
     <>
@@ -85,16 +94,41 @@ export default function RafflePage({ raffleId }) {
             {winner?.nome && <> · {winner.nome}</>}
           </p>
         )}
-        <RaffleSection total={raffle.total_numeros} sold={sold} isOpen={isOpen} onSelect={setSelected} />
+        <RaffleSection
+          total={raffle.total_numeros}
+          sold={sold}
+          selected={new Set(selection)}
+          isOpen={isOpen}
+          onToggle={toggleSelected}
+        />
       </div>
-      {selected != null && (
+      {selection.length > 0 && !checkoutOpen && (
+        <div className="selection-bar" role="region" aria-label="Números selecionados">
+          <div className="container selection-bar__content">
+            <span>
+              <strong>{selection.length}</strong> {selection.length > 1 ? 'números selecionados' : 'número selecionado'}
+              {' · '}{formatCurrency(raffle.preco_centavos * selection.length)}
+            </span>
+            <div className="selection-bar__actions">
+              <button type="button" className="button button--ghost" onClick={() => setSelected([])}>
+                Limpar
+              </button>
+              <button type="button" className="button button--primary" onClick={() => setCheckoutOpen(true)}>
+                Comprar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {checkoutOpen && (
         <CheckoutModal
           raffle={raffle}
-          number={selected}
+          numbers={selection}
+          accountEmail={accountEmail}
           unavailable={unavailable}
-          onClose={() => setSelected(null)}
-          onResult={(number) => {
-            markSold(number)
+          onClose={() => setCheckoutOpen(false)}
+          onResult={({ bought, sold: takenNumbers }) => {
+            markSold([...bought, ...takenNumbers])
             void reload()
           }}
         />

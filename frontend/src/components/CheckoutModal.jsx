@@ -3,75 +3,143 @@ import { request } from '../api.js'
 import { formatCurrency, formatNumber } from '../raffle.js'
 import Modal from './Modal.jsx'
 
-export default function CheckoutModal({ raffle, number, unavailable, onResult, onClose }) {
+const buyerEmailKey = 'rifa.buyerEmail'
+
+function readBuyerEmail() {
+  try {
+    return sessionStorage.getItem(buyerEmailKey) || ''
+  } catch {
+    return ''
+  }
+}
+
+// A API exige "nome", que aparece publicamente na grade e nos eventos.
+// Usamos só a parte antes do @ para não expor o e-mail completo.
+function publicName(email) {
+  return email.split('@')[0] || email
+}
+
+export default function CheckoutModal({ raffle, numbers, accountEmail, unavailable, onResult, onClose }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [confirmed, setConfirmed] = useState(false)
-  const label = formatNumber(number)
+  const [bought, setBought] = useState(null)
+  const [guestEmail, setGuestEmail] = useState(readBuyerEmail)
+  const [editingEmail, setEditingEmail] = useState(() => !accountEmail && !readBuyerEmail())
+  const buyerEmail = accountEmail || guestEmail
+  const sorted = [...numbers].sort((a, b) => a - b)
+  const labels = sorted.map(formatNumber).join(', ')
+  const plural = sorted.length > 1
 
   async function submit(event) {
     event.preventDefault()
-    if (busy || unavailable) return
+    if (busy || unavailable || sorted.length === 0) return
 
-    const values = new FormData(event.currentTarget)
-    const nome = values.get('nome').trim()
-    const contato = values.get('contato').trim()
-
-    if (!nome || !contato) {
-      setError('Informe seu nome e contato.')
-      return
+    let email = buyerEmail
+    if (editingEmail) {
+      email = new FormData(event.currentTarget).get('email').trim()
+      if (!email) {
+        setError('Informe seu e-mail.')
+        return
+      }
+      sessionStorage.setItem(buyerEmailKey, email)
+      setGuestEmail(email)
+      setEditingEmail(false)
     }
 
     setBusy(true)
     setError('')
 
-    try {
-      await request(`/rifas/${raffle.id}/numeros/${number}/comprar`, {
-        method: 'POST',
-        body: { nome, contato },
-      })
-      setConfirmed(true)
-      onResult(number)
-    } catch (error) {
-      setError(error.message)
-      if (error.status === 409) {
-        const numberSold = error.message.toLowerCase().includes('já vendido')
-        onResult(numberSold ? number : null)
+    const body = { nome: publicName(email), contato: email }
+    const results = await Promise.allSettled(
+      sorted.map((number) =>
+        request(`/rifas/${raffle.id}/numeros/${number}/comprar`, { method: 'POST', body }),
+      ),
+    )
+
+    const succeeded = []
+    const soldByOthers = []
+    const failures = []
+    results.forEach((result, index) => {
+      const number = sorted[index]
+      if (result.status === 'fulfilled') {
+        succeeded.push(number)
+      } else if (result.reason?.status === 409 && result.reason.message.toLowerCase().includes('já vendido')) {
+        soldByOthers.push(number)
+      } else {
+        failures.push(result.reason?.message || 'Não foi possível concluir a compra.')
       }
-    } finally {
-      setBusy(false)
+    })
+
+    onResult({ bought: succeeded, sold: soldByOthers })
+
+    if (succeeded.length > 0 && soldByOthers.length === 0 && failures.length === 0) {
+      setBought(succeeded)
+    } else {
+      const parts = []
+      if (succeeded.length) parts.push(`Comprados: ${succeeded.map(formatNumber).join(', ')}.`)
+      if (soldByOthers.length) parts.push(`Já vendidos para outra pessoa: ${soldByOthers.map(formatNumber).join(', ')}.`)
+      if (failures.length) parts.push([...new Set(failures)].join(' '))
+      setError(parts.join(' '))
     }
+
+    setBusy(false)
+  }
+
+  if (bought) {
+    return (
+      <Modal title="Compra confirmada" onClose={onClose}>
+        <div className="stacked-form">
+          <p role="status">
+            {bought.length > 1 ? 'Os números ' : 'O número '}
+            <strong>{bought.map(formatNumber).join(', ')}</strong>
+            {bought.length > 1 ? ' foram comprados' : ' foi comprado'} com sucesso.
+          </p>
+          <button type="button" className="button button--primary" onClick={onClose}>Voltar à rifa</button>
+        </div>
+      </Modal>
+    )
   }
 
   return (
-    <Modal title={confirmed ? 'Compra confirmada' : `Comprar número ${label}`} onClose={onClose} busy={busy}>
-      {confirmed ? (
-        <div className="stacked-form">
-          <p role="status">O número <strong>{label}</strong> foi comprado com sucesso.</p>
-          <button type="button" className="button button--primary" onClick={onClose}>Voltar à rifa</button>
+    <Modal
+      title={plural ? `Comprar ${sorted.length} números` : `Comprar número ${labels}`}
+      onClose={onClose}
+      busy={busy}
+    >
+      <form className="stacked-form" onSubmit={submit}>
+        {plural && <p>Números: <strong>{labels}</strong></p>}
+        <div className="purchase-total">
+          <span>{plural ? `Total (${sorted.length} × ${formatCurrency(raffle.preco_centavos)})` : 'Valor do número'}</span>
+          <strong>{formatCurrency(raffle.preco_centavos * sorted.length)}</strong>
         </div>
-      ) : (
-        <form className="stacked-form" onSubmit={submit}>
-          <div className="purchase-total">
-            <span>Valor do número</span>
-            <strong>{formatCurrency(raffle.preco_centavos)}</strong>
-          </div>
+
+        {editingEmail ? (
           <label>
-            Nome
-            <input name="nome" autoComplete="name" required />
+            E-mail
+            <input name="email" type="email" autoComplete="email" defaultValue={guestEmail} required autoFocus />
           </label>
-          <label>
-            Contato
-            <input name="contato" placeholder="Telefone ou e-mail" required />
-          </label>
-          {(error || unavailable) && (
-            <p className="feedback feedback--error" role="alert">{error || unavailable}</p>
-          )}
-          <button type="submit" className="button button--primary" disabled={busy || Boolean(unavailable)}>
-            {busy ? 'Confirmando…' : 'Confirmar compra'}
-          </button>
-        </form>
-      )}
+        ) : (
+          <p className="buyer-identity">
+            Comprando como <strong>{buyerEmail}</strong>
+            {!accountEmail && (
+              <button type="button" className="link-button" onClick={() => setEditingEmail(true)} disabled={busy}>
+                Trocar
+              </button>
+            )}
+          </p>
+        )}
+
+        {(error || unavailable) && (
+          <p className="feedback feedback--error" role="alert">{error || unavailable}</p>
+        )}
+        <button
+          type="submit"
+          className="button button--primary"
+          disabled={busy || Boolean(unavailable) || sorted.length === 0}
+        >
+          {busy ? 'Confirmando…' : 'Confirmar compra'}
+        </button>
+      </form>
     </Modal>
   )
 }
