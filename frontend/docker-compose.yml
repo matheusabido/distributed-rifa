@@ -1,0 +1,11 @@
+services:
+  front:
+    build:
+      context: .
+      args:
+        VITE_API_URL: ${VITE_API_URL:-https://rifa.peguei.gripe/api}
+    image: rifa-front
+    container_name: front
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:80"
