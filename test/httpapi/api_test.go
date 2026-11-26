@@ -1,4 +1,4 @@
-package httpapi
+package httpapi_test
 
 // Testes de ponta a ponta: sobem o app Fiber e falam com um Postgres de
 // verdade. Para rodar:
@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"rifa/internal/auth"
+	"rifa/internal/httpapi"
 	"rifa/internal/store"
 )
 
@@ -51,7 +52,7 @@ func setup(t *testing.T) *fiber.App {
 		t.Fatal(err)
 	}
 	t.Cleanup(st.Close)
-	return New(st, auth.New("segredo-de-teste"), LogNotifier{}, 1, nil).App()
+	return httpapi.New(st, auth.New("segredo-de-teste"), httpapi.LogNotifier{}, 1, nil).App()
 }
 
 // call faz uma requisição e devolve status + corpo decodificado.

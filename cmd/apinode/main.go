@@ -5,9 +5,10 @@
 //	HTTP_ADDR (:8080) -> navegadores: rotas REST + websocket (/ws) + /cluster
 //	GRPC_ADDR (:9000) -> outras APIs: Broadcast (eventos) e Monitor (saúde)
 //
-// E roda o MONITOR em segundo plano: no seu horário, checa as outras APIs e
-// os bancos, avisa as outras quando algo muda e, se for a mestre, promove o
-// banco reserva quando o primário cai.
+// E roda o MONITOR em segundo plano (ver internal/monitor): a API MESTRE
+// checa as outras APIs e os bancos e, se o primário cai, promove a réplica
+// depois de ganhar a votação; as SEGUIDORAS só checam se a mestre responde
+// e, se não, fazem uma eleição (vence a de menor ID).
 package main
 
 import (

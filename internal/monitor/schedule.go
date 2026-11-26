@@ -2,7 +2,8 @@ package monitor
 
 import "time"
 
-// Horários de checagem.
+// Horários de checagem das SEGUIDORAS (a mestre checa a cada 2s, sem
+// horário fixo; ver masterInterval em monitor.go).
 //
 // Cada API tem a sua vez, separadas por 2 segundos:
 //
@@ -15,8 +16,8 @@ import "time"
 //	API 2: 3, 9, 15, 21, 27...
 //	API 3: 5, 11, 17, 23, 29...
 //
-// Ou seja: alguém olha o sistema a cada 2 segundos, e se uma API cair as
-// outras continuam olhando. Os horários usam o relógio do computador, que é
+// Ou seja: as seguidoras se revezam conferindo se a mestre responde, e se
+// uma delas cair as outras continuam conferindo. Os horários usam o relógio do computador, que é
 // o mesmo para todos os containers.
 
 func period(totalAPIs int) time.Duration {
@@ -27,8 +28,8 @@ func offset(id, totalAPIs int) time.Duration {
 	return time.Duration(2*id-1) * time.Second % period(totalAPIs)
 }
 
-// nextSlot devolve o próximo horário (depois de "now") em que esta API checa.
-func nextSlot(now time.Time, id, totalAPIs int) time.Time {
+// NextSlot devolve o próximo horário (depois de "now") em que esta API checa.
+func NextSlot(now time.Time, id, totalAPIs int) time.Time {
 	p := period(totalAPIs)
 	// Truncate alinha no múltiplo de p (ex: :00, :06, :12...), porque o
 	// período divide 60 quando há 1, 2, 3, 5, 6, 10, 15 ou 30 APIs.
@@ -39,8 +40,8 @@ func nextSlot(now time.Time, id, totalAPIs int) time.Time {
 	return t
 }
 
-// slotSeconds lista os segundos de um minuto em que a API checa (para log).
-func slotSeconds(id, totalAPIs int) []int {
+// SlotSeconds lista os segundos de um minuto em que a API checa (para log).
+func SlotSeconds(id, totalAPIs int) []int {
 	var out []int
 	p := int(period(totalAPIs) / time.Second)
 	for s := int(offset(id, totalAPIs) / time.Second); s < 60; s += p {

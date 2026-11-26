@@ -1,4 +1,4 @@
-package httpapi
+package httpapi_test
 
 // Teste do tempo real com DUAS APIs de verdade (portas HTTP e gRPC reais):
 //
@@ -24,6 +24,7 @@ import (
 
 	"rifa/gen/rifapb"
 	"rifa/internal/auth"
+	"rifa/internal/httpapi"
 	"rifa/internal/realtime"
 	"rifa/internal/store"
 )
@@ -97,7 +98,7 @@ func startAPI(t *testing.T, st *store.Store, id int, grpcLn net.Listener, peer s
 	go gs.Serve(grpcLn)
 	t.Cleanup(gs.Stop)
 
-	app := New(st, auth.New("segredo"), cluster, id, hub).App()
+	app := httpapi.New(st, auth.New("segredo"), cluster, id, hub).App()
 	httpLn := listen(t)
 	go app.Listener(httpLn)
 	t.Cleanup(func() { _ = app.Shutdown() })

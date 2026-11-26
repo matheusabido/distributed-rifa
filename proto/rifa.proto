@@ -42,12 +42,23 @@ message Event {
 message PublishResponse {}
 
 // ---------------------------------------------------------------------------
-// Monitor: saúde do sistema
+// Monitor: saúde do sistema, eleição da API mestre e votação do failover
 // ---------------------------------------------------------------------------
-// Cada API, no seu horário (API 1 nos segundos 1, 7, 13...; API 2 nos 3, 9,
-// 15...; API 3 nos 5, 11, 17...), chama Ping nas outras APIs e testa os dois
-// bancos. Quem perceber primeiro uma mudança (algo caiu ou voltou) chama
-// ReportStatus em todas as outras APIs.
+// Papéis:
+//   MESTRE      -> a cada 2s, faz Ping em todas as APIs e testa os
+//                  bancos. Só ela decide promover a réplica, e só depois de
+//                  ganhar a votação (RequestVote) da maioria das APIs VIVAS.
+//   SEGUIDORAS  -> no seu horário, só fazem Ping na mestre (não testam os
+//                  bancos; isso é papel da mestre). Se a mestre não
+//                  responder, começam uma eleição (algoritmo do valentão /
+//                  bully): a API viva de MENOR ID vira a nova mestre.
+//
+// Eleição:
+//   1. Quem desconfia manda Election para as APIs de ID MENOR que o seu.
+//   2. Se alguma responder, ela tem prioridade: quem perguntou espera.
+//      Quem recebeu Election começa a sua própria eleição.
+//   3. Se ninguém de ID menor responder, a API se declara mestre e manda
+//      Coordinator para todas.
 
 service Monitor {
   // "Você está vivo?" Se responder, está. Se der timeout, caiu.
@@ -55,6 +66,15 @@ service Monitor {
 
   // "Descobri que <target> agora está <state>."
   rpc ReportStatus(StatusReport) returns (StatusAck);
+
+  // Eleição: "estou fazendo uma eleição; você (ID menor) está viva?"
+  rpc Election(ElectionRequest) returns (ElectionResponse);
+
+  // Eleição: "eu sou a nova mestre."
+  rpc Coordinator(CoordinatorRequest) returns (CoordinatorAck);
+
+  // Votação: "o primário caiu; posso promover <candidate_db>?"
+  rpc RequestVote(VoteRequest) returns (VoteResponse);
 }
 
 message PingRequest {
@@ -63,7 +83,7 @@ message PingRequest {
 
 message PingResponse {
   int32 node_id = 1;   // quem respondeu
-  int32 master_id = 2; // quem essa API acha que é a mestre
+  int32 master_id = 2; // quem essa API acha que é a mestre (0 = não sabe)
 }
 
 message StatusReport {
@@ -76,3 +96,28 @@ message StatusReport {
 }
 
 message StatusAck {}
+
+message ElectionRequest {
+  int32 from_id = 1; // quem começou a eleição
+}
+
+message ElectionResponse {
+  int32 node_id = 1; // "estou viva e tenho prioridade (ID menor)"
+}
+
+message CoordinatorRequest {
+  int32 master_id = 1; // a nova mestre
+}
+
+message CoordinatorAck {}
+
+message VoteRequest {
+  int32 from_id = 1;       // a mestre pedindo o voto
+  string candidate_db = 2; // banco que ela quer promover, ex "db2"
+}
+
+message VoteResponse {
+  int32 node_id = 1;
+  bool granted = 2;  // concordo em promover?
+  string reason = 3; // por que não (para log)
+}

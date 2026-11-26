@@ -3,14 +3,18 @@
 //
 // Resumo das regras:
 //
-//   - Hierarquia: API 1 > API 2 > API 3. A MESTRE é a de menor ID que está
-//     viva. Se a 1 cair, a 2 assume; quando a 1 volta, ela retoma.
-//   - Horários: cada API checa num segundo diferente (ver schedule.go). Com 3
-//     APIs: API 1 em 1, 7, 13...; API 2 em 3, 9, 15...; API 3 em 5, 11, 17...
-//   - Na sua vez, a API faz Ping (gRPC) nas outras APIs e testa os bancos.
-//   - Quem descobrir primeiro uma mudança avisa TODAS as outras (ReportStatus).
-//   - Só a MESTRE toma decisão de recuperação: se o banco primário caiu e a
-//     réplica está viva, ela promove a réplica a primário.
+//   - Papéis: existe UMA API mestre; as outras são seguidoras.
+//   - MESTRE, a cada 2s: faz Ping em todas as APIs e testa os bancos. Se o
+//     banco primário caiu e há réplica viva, pede votos às outras APIs; com a
+//     maioria das APIs vivas a favor (sozinha, decide sozinha), promove a
+//     réplica (pg_promote(true, 10) + CHECKPOINT).
+//   - SEGUIDORA, no seu horário (ver schedule.go): só faz Ping na mestre.
+//     NÃO testa os bancos: se uma query dela falhar, a requisição dá erro e
+//     resolver é papel da mestre. Se a mestre não responde, começa uma
+//     ELEIÇÃO (bully): vence a API viva de MENOR ID.
+//   - Ao subir, toda API faz uma eleição. Por isso a API 1, quando volta,
+//     retoma o posto de mestre.
+//   - Quem descobre uma mudança avisa todas as outras (ReportStatus).
 package monitor
 
 import (
@@ -37,7 +41,13 @@ const (
 	Replica = "replica" // banco que só copia o primário
 )
 
-const checkTimeout = 1 * time.Second
+const (
+	masterInterval = 2 * time.Second // de quanto em quanto tempo a mestre checa tudo
+	checkTimeout   = 1 * time.Second
+	voteTimeout    = 3 * time.Second  // quem vota testa os bancos antes de responder
+	promoteWait    = 10               // segundos que o pg_promote espera a promoção
+	promoteTimeout = 20 * time.Second // promoção + checkpoint
+)
 
 type peerAPI struct {
 	id     int
@@ -64,11 +74,13 @@ type Monitor struct {
 	OnPrimaryChange func()
 
 	mu        sync.Mutex
+	masterID  int                  // 0 = ainda não sei quem é a mestre
 	state     map[string]string    // "api2" -> "down", "db1" -> "primary"...
 	changedAt map[string]time.Time // quando cada estado mudou pela última vez
 	lastCheck time.Time
 
-	failoverMu sync.Mutex // garante uma promoção por vez
+	electionMu sync.Mutex // uma eleição por vez
+	failoverMu sync.Mutex // uma promoção por vez
 }
 
 func New(cfg config.API) (*Monitor, error) {
@@ -89,6 +101,7 @@ func New(cfg config.API) (*Monitor, error) {
 		m.peers = append(m.peers, peerAPI{id: p.ID, name: name, addr: p.Addr, client: rifapb.NewMonitorClient(conn)})
 		m.state[name] = Unknown
 	}
+	sort.Slice(m.peers, func(i, j int) bool { return m.peers[i].id < m.peers[j].id })
 	for i, host := range cfg.DBHosts {
 		name := fmt.Sprintf("db%d", i+1)
 		m.dbs = append(m.dbs, database{name: name, url: cfg.DBHostURL(host)})
@@ -103,30 +116,75 @@ func apiName(id int) string { return fmt.Sprintf("api%d", id) }
 // Laço principal
 // ---------------------------------------------------------------------------
 
-// Run fica rodando para sempre: dorme até o meu horário, checa, repete.
+// Run: faz uma eleição ao subir e depois age conforme o papel:
+//
+//	mestre    -> checa tudo a cada 2s
+//	seguidora -> no seu horário, só confere se a mestre responde
 func (m *Monitor) Run(ctx context.Context) {
-	log.Printf("[monitor] eu checo nos segundos %v (a cada %v)",
-		slotSeconds(m.selfID, m.totalAPIs), period(m.totalAPIs))
+	log.Printf("[monitor] como mestre, checo a cada %v; como seguidora, nos segundos %v",
+		masterInterval, SlotSeconds(m.selfID, m.totalAPIs))
+
+	m.elect(ctx)
+
 	for {
-		next := nextSlot(time.Now(), m.selfID, m.totalAPIs)
+		wait := masterInterval
+		if !m.IsMaster() {
+			wait = time.Until(NextSlot(time.Now(), m.selfID, m.totalAPIs))
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(time.Until(next)):
+		case <-time.After(wait):
 		}
-		m.checkAll(ctx)
+		if m.IsMaster() {
+			m.masterCheck(ctx)
+		} else {
+			m.followerCheck(ctx)
+		}
+		m.mu.Lock()
+		m.lastCheck = time.Now().UTC()
+		m.mu.Unlock()
 	}
 }
 
-// checkAll é "a minha vez de olhar": testa todas as APIs e todos os bancos
-// AO MESMO TEMPO (em paralelo), para a checagem durar no máximo ~1s.
-func (m *Monitor) checkAll(ctx context.Context) {
+// followerCheck: a seguidora só confere se a mestre está respondendo.
+func (m *Monitor) followerCheck(ctx context.Context) {
+	master := m.MasterID()
+	p, ok := m.peer(master)
+	if !ok {
+		log.Printf("[monitor] não sei quem é a mestre: começando eleição")
+		m.elect(ctx)
+		return
+	}
+	if m.pingAPI(ctx, p) == Up {
+		m.apply(p.name, Up, m.selfID)
+		return
+	}
+	log.Printf("[monitor] a mestre %s não respondeu: começando eleição", p.name)
+	m.mu.Lock()
+	if m.masterID == master {
+		m.masterID = 0
+	}
+	m.mu.Unlock()
+	m.apply(p.name, Down, m.selfID)
+	m.elect(ctx)
+}
+
+// masterCheck: a mestre testa todas as APIs e todos os bancos AO MESMO TEMPO
+// (em paralelo, ~1s no máximo) e, se preciso, conduz o failover do banco.
+func (m *Monitor) masterCheck(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, p := range m.peers {
 		wg.Add(1)
 		go func(p peerAPI) {
 			defer wg.Done()
-			m.apply(p.name, m.pingAPI(ctx, p), m.selfID)
+			old := m.stateOf(p.name)
+			st := m.pingAPI(ctx, p)
+			m.apply(p.name, st, m.selfID)
+			if st == Up && old != Up {
+				// API que (re)apareceu: conto quem é a mestre e o estado atual.
+				go m.sendSnapshot(p)
+			}
 		}(p)
 	}
 	for _, db := range m.dbs {
@@ -138,11 +196,7 @@ func (m *Monitor) checkAll(ctx context.Context) {
 	}
 	wg.Wait()
 
-	m.mu.Lock()
-	m.lastCheck = time.Now().UTC()
-	m.mu.Unlock()
-
-	if m.IsMaster() {
+	if m.IsMaster() { // posso ter perdido o posto durante a checagem
 		m.maybeFailover(ctx)
 	}
 }
@@ -178,6 +232,25 @@ func checkDB(ctx context.Context, url string) string {
 	return Primary
 }
 
+// checkAllDBs testa todos os bancos em paralelo, sem registrar nada.
+func (m *Monitor) checkAllDBs(ctx context.Context) map[string]string {
+	out := make(map[string]string, len(m.dbs))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, db := range m.dbs {
+		wg.Add(1)
+		go func(db database) {
+			defer wg.Done()
+			st := checkDB(ctx, db.url)
+			mu.Lock()
+			out[db.name] = st
+			mu.Unlock()
+		}(db)
+	}
+	wg.Wait()
+	return out
+}
+
 // ---------------------------------------------------------------------------
 // Mudanças de estado
 // ---------------------------------------------------------------------------
@@ -191,10 +264,8 @@ func (m *Monitor) apply(target, newState string, reporter int) {
 		m.mu.Unlock()
 		return
 	}
-	oldMaster := m.masterLocked()
 	m.state[target] = newState
 	m.changedAt[target] = time.Now().UTC()
-	newMaster := m.masterLocked()
 	m.mu.Unlock()
 
 	if reporter == m.selfID {
@@ -204,9 +275,6 @@ func (m *Monitor) apply(target, newState string, reporter int) {
 		log.Printf("[monitor] a api%d me avisou: %s %s -> %s", reporter, target, old, newState)
 	}
 
-	if oldMaster != newMaster {
-		log.Printf("[monitor] a API mestre agora é a api%d", newMaster)
-	}
 	if isDB(target) && (old == Primary || newState == Primary) && m.OnPrimaryChange != nil {
 		m.OnPrimaryChange()
 	}
@@ -223,7 +291,7 @@ func (m *Monitor) broadcast(target, state string) {
 	}
 	for _, p := range m.peers {
 		if p.name == target || m.stateOf(p.name) == Down {
-			continue // não adianta avisar quem caiu; quando voltar, ela checa sozinha
+			continue // não adianta avisar quem caiu; quando voltar, recebe o snapshot
 		}
 		go func(p peerAPI) {
 			ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
@@ -235,41 +303,141 @@ func (m *Monitor) broadcast(target, state string) {
 	}
 }
 
+// sendSnapshot manda para uma API (que acabou de aparecer) quem é a mestre
+// e tudo o que eu sei. Só a mestre chama isto.
+func (m *Monitor) sendSnapshot(p peerAPI) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*checkTimeout)
+	defer cancel()
+	if _, err := p.client.Coordinator(ctx, &rifapb.CoordinatorRequest{MasterId: int32(m.selfID)}); err != nil {
+		return
+	}
+	m.mu.Lock()
+	snapshot := make(map[string]string, len(m.state))
+	for k, v := range m.state {
+		snapshot[k] = v
+	}
+	m.mu.Unlock()
+	for target, st := range snapshot {
+		if target == p.name || st == Unknown {
+			continue
+		}
+		_, _ = p.client.ReportStatus(ctx, &rifapb.StatusReport{
+			ReporterId: int32(m.selfID), Target: target, State: st, AtUnix: time.Now().UTC().Unix(),
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
-// Hierarquia
+// Hierarquia e eleição (algoritmo do valentão / bully, menor ID vence)
 // ---------------------------------------------------------------------------
 
-// MasterID é a API de menor ID que não está marcada como fora do ar.
-// "unknown" conta como viva: assim a API 2, ao subir, não se declara mestre
-// antes de ter checado se a API 1 está de pé.
+// MasterID é a mestre que foi eleita (0 = ainda não sei).
 func (m *Monitor) MasterID() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.masterLocked()
-}
-
-func (m *Monitor) masterLocked() int {
-	master := m.selfID
-	for _, p := range m.peers {
-		if m.state[p.name] != Down && p.id < master {
-			master = p.id
-		}
-	}
-	return master
+	return m.masterID
 }
 
 func (m *Monitor) IsMaster() bool { return m.MasterID() == m.selfID }
 
+func (m *Monitor) setMaster(id int) {
+	m.mu.Lock()
+	old := m.masterID
+	m.masterID = id
+	m.mu.Unlock()
+	if old != id {
+		log.Printf("[eleição] a API mestre agora é a api%d", id)
+	}
+}
+
+func (m *Monitor) peer(id int) (peerAPI, bool) {
+	for _, p := range m.peers {
+		if p.id == id {
+			return p, true
+		}
+	}
+	return peerAPI{}, false
+}
+
+// elect: pergunto às APIs de ID MENOR que o meu se estão vivas. Se alguma
+// responder, ela tem prioridade e vai se anunciar (Coordinator); eu espero.
+// Se nenhuma responder, eu viro a mestre e aviso todo mundo.
+func (m *Monitor) elect(ctx context.Context) {
+	if !m.electionMu.TryLock() {
+		return // já tem uma eleição minha em andamento
+	}
+	defer m.electionMu.Unlock()
+
+	var lower []peerAPI
+	for _, p := range m.peers {
+		if p.id < m.selfID {
+			lower = append(lower, p)
+		}
+	}
+
+	alive := make([]bool, len(lower))
+	var wg sync.WaitGroup
+	for i, p := range lower {
+		wg.Add(1)
+		go func(i int, p peerAPI) {
+			defer wg.Done()
+			cctx, cancel := context.WithTimeout(ctx, checkTimeout)
+			defer cancel()
+			_, err := p.client.Election(cctx, &rifapb.ElectionRequest{FromId: int32(m.selfID)}, grpc.WaitForReady(true))
+			alive[i] = err == nil
+		}(i, p)
+	}
+	wg.Wait()
+
+	for i, p := range lower {
+		if alive[i] {
+			m.apply(p.name, Up, m.selfID)
+			log.Printf("[eleição] %s (ID menor) está viva: ela tem prioridade, aguardo o anúncio", p.name)
+			return
+		}
+		m.apply(p.name, Down, m.selfID)
+	}
+
+	m.becomeMaster(ctx)
+}
+
+// becomeMaster: assumo o posto, aviso todas as APIs e já faço uma checagem
+// completa (sem esperar o meu horário).
+func (m *Monitor) becomeMaster(ctx context.Context) {
+	wasMaster := m.IsMaster()
+	m.setMaster(m.selfID)
+	if !wasMaster {
+		log.Printf("[eleição] nenhuma API de ID menor respondeu: EU sou a mestre")
+	}
+
+	var wg sync.WaitGroup
+	for _, p := range m.peers {
+		wg.Add(1)
+		go func(p peerAPI) {
+			defer wg.Done()
+			cctx, cancel := context.WithTimeout(ctx, checkTimeout)
+			defer cancel()
+			if _, err := p.client.Coordinator(cctx, &rifapb.CoordinatorRequest{MasterId: int32(m.selfID)}); err != nil {
+				log.Printf("[eleição] não consegui me anunciar para %s: %v", p.name, err)
+			}
+		}(p)
+	}
+	wg.Wait()
+
+	if !wasMaster {
+		go m.masterCheck(context.WithoutCancel(ctx))
+	}
+}
+
 // ---------------------------------------------------------------------------
-// Recuperação do banco (só a mestre)
+// Recuperação do banco (só a mestre, com votação)
 // ---------------------------------------------------------------------------
 
-// maybeFailover: se NENHUM banco é primário e existe uma réplica viva,
-// promove a réplica.
+// maybeFailover: se NENHUM banco é primário e existe uma réplica viva, pede
+// votos às outras APIs e, com a maioria, promove a réplica.
 //
-// Antes de promover, checa os bancos de novo na hora: promover é uma ação
-// séria (não dá para desfazer), então não confiamos só no que os outros
-// avisaram.
+// Antes, checa os bancos de novo na hora: promover é uma ação séria (não dá
+// para desfazer), então não confiamos só na checagem anterior.
 func (m *Monitor) maybeFailover(ctx context.Context) {
 	if !m.failoverMu.TryLock() {
 		return // já tem uma promoção em andamento
@@ -280,9 +448,10 @@ func (m *Monitor) maybeFailover(ctx context.Context) {
 		return
 	}
 
+	fresh := m.checkAllDBs(ctx)
 	var candidate *database
 	for i := range m.dbs {
-		st := checkDB(ctx, m.dbs[i].url)
+		st := fresh[m.dbs[i].name]
 		m.apply(m.dbs[i].name, st, m.selfID)
 		if st == Primary {
 			return // alarme falso: tem primário
@@ -292,23 +461,87 @@ func (m *Monitor) maybeFailover(ctx context.Context) {
 		}
 	}
 	if candidate == nil {
-		log.Printf("[monitor] nenhum banco disponível para promover")
+		log.Printf("[failover] nenhum banco disponível para promover")
 		return
 	}
 
-	log.Printf("[monitor] SOU A MESTRE e não há banco primário: promovendo %s", candidate.name)
+	votes, alive := m.collectVotes(ctx, candidate.name)
+	needed := alive/2 + 1
+	if votes < needed {
+		log.Printf("[failover] votação PERDIDA para promover %s: %d de %d APIs vivas (precisa de %d). Não promovo.",
+			candidate.name, votes, alive, needed)
+		return
+	}
+	if !m.IsMaster() {
+		log.Printf("[failover] deixei de ser a mestre durante a votação: não promovo")
+		return
+	}
+
+	log.Printf("[failover] votação GANHA (%d de %d APIs vivas): promovendo %s", votes, alive, candidate.name)
 	if err := promote(ctx, candidate.url); err != nil {
-		log.Printf("[monitor] falha ao promover %s: %v", candidate.name, err)
+		log.Printf("[failover] falha ao promover %s: %v", candidate.name, err)
 		return
 	}
 	m.apply(candidate.name, Primary, m.selfID)
-	log.Printf("[monitor] %s agora é o banco PRIMÁRIO", candidate.name)
+	log.Printf("[failover] %s agora é o banco PRIMÁRIO", candidate.name)
 }
 
-// promote transforma uma réplica em primário. pg_promote(true, 10) espera
-// até 10s pela promoção terminar.
+// collectVotes pede o voto de todas as outras APIs (em paralelo) e devolve
+// quantos SIM recebeu e quantas APIs estão vivas (as que responderam, sim ou
+// não, mais eu). Meu voto já conta: eu acabei de conferir os bancos.
+//
+// A maioria é das VIVAS: com 3 vivas precisa de 2, com 2 vivas precisa de 2,
+// e uma API sozinha decide sozinha (1 de 1).
+func (m *Monitor) collectVotes(ctx context.Context, candidate string) (votes, alive int) {
+	votes, alive = 1, 1
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, p := range m.peers {
+		if m.stateOf(p.name) == Down {
+			continue
+		}
+		wg.Add(1)
+		go func(p peerAPI) {
+			defer wg.Done()
+			cctx, cancel := context.WithTimeout(ctx, voteTimeout)
+			defer cancel()
+			resp, err := p.client.RequestVote(cctx, &rifapb.VoteRequest{FromId: int32(m.selfID), CandidateDb: candidate})
+			if err != nil {
+				log.Printf("[failover] %s não votou (conta como fora do ar): %v", p.name, err)
+				return
+			}
+			mu.Lock()
+			alive++
+			if resp.Granted {
+				votes++
+			}
+			mu.Unlock()
+			if resp.Granted {
+				log.Printf("[failover] %s votou SIM para promover %s", p.name, candidate)
+			} else {
+				log.Printf("[failover] %s votou NÃO: %s", p.name, resp.Reason)
+			}
+		}(p)
+	}
+	wg.Wait()
+	return votes, alive
+}
+
+// promote transforma uma réplica em primário:
+//
+//	SELECT pg_promote(true, 10);  -> sai do modo réplica, esperando até 10s
+//	CHECKPOINT;                   -> grava já o novo timeline no pg_control.
+//	                                 O entrypoint do banco compara timelines
+//	                                 lendo o pg_control para decidir quem é o
+//	                                 primário de verdade; sem o checkpoint
+//	                                 ele ainda veria o timeline antigo.
+//
+// Se os 10s estourarem, o pg_promote devolve false mas a promoção continua
+// por baixo. Por isso, nesse caso, confiro pg_is_in_recovery() antes de
+// desistir.
 func promote(ctx context.Context, url string) error {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, promoteTimeout)
 	defer cancel()
 	conn, err := pgx.Connect(ctx, url)
 	if err != nil {
@@ -316,11 +549,17 @@ func promote(ctx context.Context, url string) error {
 	}
 	defer conn.Close(context.Background())
 	var ok bool
-	if err := conn.QueryRow(ctx, `SELECT pg_promote(true, 10)`).Scan(&ok); err != nil {
-		return err
+	if err := conn.QueryRow(ctx, `SELECT pg_promote(true, $1)`, promoteWait).Scan(&ok); err != nil {
+		return fmt.Errorf("pg_promote: %w", err)
 	}
 	if !ok {
-		return fmt.Errorf("pg_promote devolveu false")
+		var inRecovery bool
+		if err := conn.QueryRow(ctx, `SELECT pg_is_in_recovery()`).Scan(&inRecovery); err != nil || inRecovery {
+			return fmt.Errorf("pg_promote não terminou em %ds", promoteWait)
+		}
+	}
+	if _, err := conn.Exec(ctx, `CHECKPOINT`); err != nil {
+		return fmt.Errorf("checkpoint: %w", err)
 	}
 	return nil
 }
@@ -356,13 +595,76 @@ func (m *Monitor) ReportStatus(ctx context.Context, r *rifapb.StatusReport) (*ri
 	// Se alguém diz que EU caí, é engano (estou respondendo): ignoro.
 	if r.Target != apiName(m.selfID) {
 		m.apply(r.Target, r.State, int(r.ReporterId))
-		// Se virei mestre por causa desse aviso, ou se o aviso foi de banco,
-		// vejo se preciso agir agora, sem esperar a minha vez.
-		if m.IsMaster() {
-			go m.maybeFailover(context.Background())
-		}
 	}
 	return &rifapb.StatusAck{}, nil
+}
+
+// Election: uma API de ID maior está fazendo eleição. Respondo "estou viva"
+// e, como tenho prioridade, faço a minha própria eleição (ou, se já sou a
+// mestre, só me anuncio de novo).
+func (m *Monitor) Election(ctx context.Context, r *rifapb.ElectionRequest) (*rifapb.ElectionResponse, error) {
+	from := int(r.FromId)
+	if p, ok := m.peer(from); ok {
+		m.apply(p.name, Up, from)
+	}
+	if m.IsMaster() {
+		if p, ok := m.peer(from); ok {
+			go func() {
+				cctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
+				defer cancel()
+				_, _ = p.client.Coordinator(cctx, &rifapb.CoordinatorRequest{MasterId: int32(m.selfID)})
+			}()
+		}
+	} else {
+		go m.elect(context.Background())
+	}
+	return &rifapb.ElectionResponse{NodeId: int32(m.selfID)}, nil
+}
+
+// Coordinator: alguém se anunciou como mestre. Se ela tem ID menor que o
+// meu, aceito. Se tem ID MAIOR, ela achou que eu estava fora do ar: faço
+// uma eleição para retomar o posto.
+func (m *Monitor) Coordinator(ctx context.Context, r *rifapb.CoordinatorRequest) (*rifapb.CoordinatorAck, error) {
+	leader := int(r.MasterId)
+	switch {
+	case leader == m.selfID:
+	case leader > m.selfID:
+		log.Printf("[eleição] api%d se anunciou mestre, mas eu (ID menor) estou viva: nova eleição", leader)
+		go m.elect(context.Background())
+	default:
+		m.setMaster(leader)
+		if p, ok := m.peer(leader); ok {
+			m.apply(p.name, Up, leader)
+		}
+	}
+	return &rifapb.CoordinatorAck{}, nil
+}
+
+// RequestVote: a mestre quer promover uma réplica. Confiro por conta própria
+// (conectando direto nos bancos) antes de concordar.
+func (m *Monitor) RequestVote(ctx context.Context, r *rifapb.VoteRequest) (*rifapb.VoteResponse, error) {
+	deny := func(format string, a ...any) (*rifapb.VoteResponse, error) {
+		reason := fmt.Sprintf(format, a...)
+		log.Printf("[failover] voto NÃO para api%d promover %s: %s", r.FromId, r.CandidateDb, reason)
+		return &rifapb.VoteResponse{NodeId: int32(m.selfID), Granted: false, Reason: reason}, nil
+	}
+
+	if master := m.MasterID(); master != 0 && master != int(r.FromId) {
+		return deny("para mim a mestre é a api%d", master)
+	}
+
+	states := m.checkAllDBs(ctx)
+	for name, st := range states {
+		if st == Primary {
+			return deny("eu vejo %s como primário", name)
+		}
+	}
+	if states[r.CandidateDb] != Replica {
+		return deny("eu vejo %s como %q, não como réplica", r.CandidateDb, states[r.CandidateDb])
+	}
+
+	log.Printf("[failover] voto SIM para api%d promover %s", r.FromId, r.CandidateDb)
+	return &rifapb.VoteResponse{NodeId: int32(m.selfID), Granted: true}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -389,8 +691,8 @@ func (m *Monitor) View() View {
 	defer m.mu.Unlock()
 	v := View{
 		Me:        m.selfID,
-		Master:    m.masterLocked(),
-		MySlots:   slotSeconds(m.selfID, m.totalAPIs),
+		Master:    m.masterID,
+		MySlots:   SlotSeconds(m.selfID, m.totalAPIs),
 		LastCheck: m.lastCheck,
 	}
 	for name, st := range m.state {

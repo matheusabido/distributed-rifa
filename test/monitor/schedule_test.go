@@ -1,7 +1,8 @@
-package monitor
+package monitor_test
 
 import (
 	"reflect"
+	"rifa/internal/monitor"
 	"testing"
 	"time"
 )
@@ -13,7 +14,7 @@ func TestSegundosCombinados(t *testing.T) {
 		3: {5, 11, 17, 23, 29, 35, 41, 47, 53, 59},
 	}
 	for id, w := range want {
-		if got := slotSeconds(id, 3); !reflect.DeepEqual(got, w) {
+		if got := monitor.SlotSeconds(id, 3); !reflect.DeepEqual(got, w) {
 			t.Errorf("api%d: %v, esperava %v", id, got, w)
 		}
 	}
@@ -32,7 +33,7 @@ func TestProximoHorario(t *testing.T) {
 	}
 	for _, c := range cases {
 		now := base.Add(time.Duration(c.now) * time.Second)
-		got := nextSlot(now, c.id, 3)
+		got := monitor.NextSlot(now, c.id, 3)
 		want := base.Add(time.Duration(c.proximo) * time.Second)
 		if !got.Equal(want) {
 			t.Errorf("api%d no segundo %d: próximo %v, esperava %v", c.id, c.now, got.Sub(base), want.Sub(base))
