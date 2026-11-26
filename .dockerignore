@@ -1,0 +1,5 @@
+bin
+*.zip
+.env
+frontend/node_modules
+frontend/dist

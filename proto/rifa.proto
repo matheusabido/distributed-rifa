@@ -1,0 +1,78 @@
+// Contrato gRPC entre as réplicas da API.
+//
+// O banco é acessado direto por SQL (pgxpool). O gRPC serve para as APIs
+// conversarem entre si, e tem DOIS serviços:
+//
+//   Broadcast -> repassar eventos da rifa para os navegadores (tempo real)
+//   Monitor   -> checar quem está vivo e avisar quando algo cai ou volta
+//
+// Broadcast: cada navegador fica conectado por websocket em UMA das APIs. Se a
+// compra do número 42 passou pela API 1, quem está conectado na API 2 também
+// precisa ver o 42 ficar ocupado. Então a API 1 chama Publish na API 2, e a
+// API 2 repassa o evento aos navegadores dela.
+//
+// O protoc lê este arquivo e gera o código Go em gen/rifapb.
+
+syntax = "proto3";
+
+package rifa;
+
+option go_package = "rifa/gen/rifapb";
+
+service Broadcast {
+  // "Aconteceu isto, avise os seus navegadores."
+  rpc Publish(Event) returns (PublishResponse);
+}
+
+message Event {
+  // Tipos de evento:
+  //   raffle_updated  -> título/descrição/prêmio/preço mudou
+  //   raffle_status   -> abriu ou fechou
+  //   ticket_bought   -> alguém comprou um número
+  //   raffle_drawn    -> sorteio feito
+  string type = 1;
+  int64 raffle_id = 2;
+  // O mesmo JSON que vai para o navegador. A API que recebe não precisa
+  // entender o conteúdo, só repassar.
+  string payload_json = 3;
+  // ID da API que gerou o evento. Serve para log e para evitar eco.
+  int32 origin_api_id = 4;
+}
+
+message PublishResponse {}
+
+// ---------------------------------------------------------------------------
+// Monitor: saúde do sistema
+// ---------------------------------------------------------------------------
+// Cada API, no seu horário (API 1 nos segundos 1, 7, 13...; API 2 nos 3, 9,
+// 15...; API 3 nos 5, 11, 17...), chama Ping nas outras APIs e testa os dois
+// bancos. Quem perceber primeiro uma mudança (algo caiu ou voltou) chama
+// ReportStatus em todas as outras APIs.
+
+service Monitor {
+  // "Você está vivo?" Se responder, está. Se der timeout, caiu.
+  rpc Ping(PingRequest) returns (PingResponse);
+
+  // "Descobri que <target> agora está <state>."
+  rpc ReportStatus(StatusReport) returns (StatusAck);
+}
+
+message PingRequest {
+  int32 from_id = 1; // quem está perguntando
+}
+
+message PingResponse {
+  int32 node_id = 1;   // quem respondeu
+  int32 master_id = 2; // quem essa API acha que é a mestre
+}
+
+message StatusReport {
+  int32 reporter_id = 1; // qual API descobriu
+  string target = 2;     // "api1", "api2", "api3", "db1", "db2"
+  // APIs:   "up" ou "down"
+  // bancos: "primary" (aceita escrita), "replica" (só cópia) ou "down"
+  string state = 3;
+  int64 at_unix = 4;     // quando descobriu (segundos, UTC)
+}
+
+message StatusAck {}

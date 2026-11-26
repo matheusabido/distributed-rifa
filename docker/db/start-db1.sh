@@ -1,1 +1,0 @@
-docker compose -f docker-compose-db.yml -p db1 --env-file db1.env up -d

@@ -1,0 +1,98 @@
+# Sistema completo: docker compose up --build
+#
+#   http://localhost:3000   -> site (nginx: frontend + balanceamento das APIs)
+#   localhost:8081/8082/8083 -> cada API direto (para testes)
+#   localhost:5431 / 5432    -> db1 / db2 direto (para olhar com psql)
+#
+#                    navegador
+#                        │
+#                   web (nginx :3000)
+#           ┌────────────┼────────────┐
+#         api1         api2         api3      ← gRPC entre elas (Broadcast + Monitor)
+#           └────────────┼────────────┘
+#              pgx: "quem for o primário"
+#               ┌────────┴────────┐
+#              db1  ──replica──►  db2
+#           (primário)         (réplica)
+#
+# Antes da primeira vez: cp .env.example .env
+
+x-api: &api
+  build: .
+  env_file: .env
+  restart: unless-stopped
+  depends_on: [db1, db2]
+
+x-api-env: &api-env
+  DB_HOSTS: db1:5432,db2:5432
+  DB_USER: postgres
+  DB_PASSWORD: ${POSTGRES_PASSWORD}
+  DB_NAME: ${DB_NAME}
+
+x-db: &db
+  build: ./docker/db
+  image: rifa-postgres:19
+  command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+  environment: &db-env
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    POSTGRES_DB: ${DB_NAME}
+
+services:
+  db1:
+    <<: *db
+    environment:
+      <<: *db-env
+      NODE_NAME: db1
+      PEER_HOST: db2
+      INITIAL_ROLE: primary     # na primeira vez, db1 nasce primário
+    ports: ["5431:5432"]
+    volumes:
+      - db1_data:/var/lib/postgresql
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/02-schema.sql:ro
+
+  db2:
+    <<: *db
+    environment:
+      <<: *db-env
+      NODE_NAME: db2
+      PEER_HOST: db1
+      INITIAL_ROLE: standby     # na primeira vez, db2 copia o db1
+    ports: ["5432:5432"]
+    volumes:
+      - db2_data:/var/lib/postgresql
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/02-schema.sql:ro
+
+  api1:
+    <<: *api
+    environment:
+      <<: *api-env
+      NODE_ID: "1"
+      PEER_APIS: 2@api2:9000,3@api3:9000
+    ports: ["8081:8080"]
+
+  api2:
+    <<: *api
+    environment:
+      <<: *api-env
+      NODE_ID: "2"
+      PEER_APIS: 1@api1:9000,3@api3:9000
+    ports: ["8082:8080"]
+
+  api3:
+    <<: *api
+    environment:
+      <<: *api-env
+      NODE_ID: "3"
+      PEER_APIS: 1@api1:9000,2@api2:9000
+    ports: ["8083:8080"]
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    ports: ["3000:80"]
+    depends_on: [api1, api2, api3]
+
+volumes:
+  db1_data:
+  db2_data:

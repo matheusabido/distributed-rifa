@@ -1,0 +1,71 @@
+.header {
+  border-bottom: 1px solid #d8e7f4;
+  background: white;
+}
+
+.header__content,
+.account-nav,
+.brand {
+  display: flex;
+  align-items: center;
+}
+
+.header__content {
+  min-height: 72px;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 10px;
+}
+
+.account-nav {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.account-nav .button {
+  margin: 0;
+  padding-inline: 14px;
+}
+
+.brand {
+  gap: 10px;
+  color: #12385f;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.25;
+  text-decoration: none;
+}
+
+.brand small {
+  display: block;
+  margin-top: 3px;
+  font-size: .76rem;
+  font-weight: 500;
+}
+
+.brand__mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 12px;
+  color: white;
+  background: #0965bf;
+}
+
+@media (max-width: 460px) {
+  .account-nav .button {
+    padding-inline: 10px;
+    font-size: .83rem;
+  }
+
+  .header .brand small {
+    display: none;
+  }
+
+  .header .brand__mark {
+    display: none;
+  }
+}
