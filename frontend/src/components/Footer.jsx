@@ -1,15 +1,17 @@
+import './Footer.css'
+
 export default function Footer() {
   return (
     <footer>
       <div className="container footer-content">
         <div className="brand brand--footer">
-          <span className="brand__mark">R</span>
+          <span className="brand__mark" aria-hidden="true">R</span>
           <span>
-            Rifa do Chico
-            <small>UFMT · Sistemas Distribuídos</small>
+            Rifas UFMT
+            <small>Universidade Federal de Mato Grosso</small>
           </span>
         </div>
-        <p>Feito com carinho para ajudar uma vida. 💙</p>
+        <p>Projeto da disciplina de Sistemas Distribuídos.</p>
       </div>
     </footer>
   )

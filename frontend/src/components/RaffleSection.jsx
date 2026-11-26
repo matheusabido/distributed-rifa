@@ -1,111 +1,97 @@
 import { useState } from 'react'
-import { formatNumber, NUMBER_COUNT, reservedNumbers } from '../raffle.js'
-import Icon from './Icon.jsx'
-import SelectionSummary from './SelectionSummary.jsx'
+import { formatNumber } from '../raffle.js'
 
-const numbers = Array.from({ length: NUMBER_COUNT }, (_, index) => index + 1)
-
-const filters = [
-  { value: 'all', label: 'Todos' },
-  { value: 'available', label: 'Disponíveis' },
-]
-
-const legend = [
-  { state: 'available', label: 'Disponível' },
-  { state: 'selected', label: 'Selecionado' },
-  { state: 'reserved', label: 'Reservado' },
-]
-
-function NumberButton({ number, isSelected, onToggle }) {
-  const isReserved = reservedNumbers.has(number)
-  const className = [
-    'number-button',
-    isReserved && 'reserved',
-    isSelected && 'selected',
-  ].filter(Boolean).join(' ')
-
-  let status = 'disponível'
-  if (isReserved) {
-    status = 'reservado'
-  } else if (isSelected) {
-    status = 'selecionado'
-  }
-
-  return (
-    <button
-      type="button"
-      className={className}
-      onClick={() => onToggle(number)}
-      disabled={isReserved}
-      aria-pressed={isSelected}
-      aria-label={`Número ${number}, ${status}`}
-    >
-      {formatNumber(number)}
-      {isSelected && (
-        <span className="number-check">
-          <Icon name="check" size={10} />
-        </span>
-      )}
-    </button>
-  )
-}
-
-export default function RaffleSection({ selected, onToggle, onContinue }) {
-  const [filter, setFilter] = useState('all')
-  const visibleNumbers = filter === 'available'
-    ? numbers.filter((number) => !reservedNumbers.has(number))
+export default function RaffleSection({ total, sold, isOpen, onSelect }) {
+  const [onlyAvailable, setOnlyAvailable] = useState(false)
+  const [page, setPage] = useState(1)
+  const pageCount = Math.ceil(total / 100)
+  const currentPage = Math.min(page, pageCount)
+  const firstNumber = (currentPage - 1) * 100 + 1
+  const lastNumber = Math.min(firstNumber + 99, total)
+  const numbers = Array.from({ length: lastNumber - firstNumber + 1 }, (_, index) => firstNumber + index)
+  const visible = onlyAvailable && isOpen
+    ? numbers.filter((number) => !sold.has(number))
     : numbers
 
   return (
-    <section className="raffle-section" id="numeros" aria-labelledby="raffle-title">
-      <div className="container raffle-layout">
-        <div className="raffle-main">
-          <div className="section-heading">
-            <div>
-              <span className="section-kicker">Participe agora</span>
-              <h2 id="raffle-title">Escolha seus números</h2>
-              <p>
-                Selecione quantos quiser. Quanto mais números, mais chances de
-                ganhar e mais você ajuda o Chico.
-              </p>
-            </div>
-            <div className="filter-control" role="group" aria-label="Filtrar números">
-              {filters.map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={filter === value ? 'active' : ''}
-                  aria-pressed={filter === value}
-                  onClick={() => setFilter(value)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="number-legend" aria-label="Legenda">
-            {legend.map(({ state, label }) => (
-              <span key={state}>
-                <i className={`legend-dot legend-dot--${state}`} /> {label}
-              </span>
-            ))}
-          </div>
-
-          <div className="number-grid" role="group" aria-label="Números da rifa">
-            {visibleNumbers.map((number) => (
-              <NumberButton
-                key={number}
-                number={number}
-                isSelected={selected.includes(number)}
-                onToggle={onToggle}
-              />
-            ))}
-          </div>
+    <section aria-labelledby="raffle-title">
+      <div className="section-heading">
+        <div>
+          <h2 id="raffle-title">Números da rifa</h2>
+          <p>{isOpen ? 'Toque em um número disponível para comprar.' : 'Esta rifa está fora do período de compras.'}</p>
         </div>
-
-        <SelectionSummary selected={selected} onContinue={onContinue} />
+        {isOpen && (
+          <div className="filter-control" role="group" aria-label="Filtrar números">
+            <button
+              type="button"
+              className={!onlyAvailable ? 'active' : ''}
+              aria-pressed={!onlyAvailable}
+              onClick={() => setOnlyAvailable(false)}
+            >
+              Todos
+            </button>
+            <button
+              type="button"
+              className={onlyAvailable ? 'active' : ''}
+              aria-pressed={onlyAvailable}
+              onClick={() => setOnlyAvailable(true)}
+            >
+              Disponíveis
+            </button>
+          </div>
+        )}
       </div>
+
+      <div className="number-legend">
+        <span><i className="legend-dot legend-dot--available" />{isOpen ? 'Disponível' : 'Não vendido'}</span>
+        <span><i className="legend-dot legend-dot--reserved" />Vendido</span>
+      </div>
+
+      {pageCount > 1 && (
+        <nav className="pagination" aria-label="Páginas de números">
+          <button
+            type="button"
+            className="button button--ghost"
+            disabled={currentPage === 1}
+            onClick={() => setPage(currentPage - 1)}
+          >
+            Anterior
+          </button>
+          <span aria-live="polite">{firstNumber}–{lastNumber} de {total}</span>
+          <button
+            type="button"
+            className="button button--ghost"
+            disabled={currentPage === pageCount}
+            onClick={() => setPage(currentPage + 1)}
+          >
+            Próxima
+          </button>
+        </nav>
+      )}
+
+      {visible.length === 0 ? (
+        <p className="feedback" role="status">Nenhum número disponível nesta página.</p>
+      ) : (
+        <div className="number-grid" role="group" aria-label="Números da rifa">
+          {visible.map((number) => {
+            const isSold = sold.has(number)
+            const status = isSold ? 'vendido' : isOpen ? 'disponível' : 'não vendido'
+
+            return (
+              <button
+                key={number}
+                type="button"
+                className={isSold ? 'number-button reserved' : 'number-button'}
+                disabled={!isOpen || isSold}
+                aria-label={`Número ${number}, ${status}`}
+                onClick={() => onSelect(number)}
+              >
+                {formatNumber(number)}
+              </button>
+            )
+          })}
+        </div>
+      )}
     </section>
   )
 }

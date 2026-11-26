@@ -1,64 +1,53 @@
-.raffle-section {
-  padding: 82px 0 92px;
-}
-
-.raffle-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 310px;
-  align-items: start;
-  gap: 48px;
-}
-
 .section-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 24px;
+  gap: 14px;
+}
+
+.section-heading h2 {
+  color: #12385f;
+  font-family: 'Nunito', system-ui, sans-serif;
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
 }
 
 .section-heading p {
-  max-width: 650px;
-  margin-top: 10px;
-  color: #698198;
-  font-size: .94rem;
-  line-height: 1.55;
+  margin-top: 6px;
+  color: #385978;
 }
 
 .filter-control {
-  flex: 0 0 auto;
   display: flex;
+  gap: 4px;
   padding: 4px;
-  border: 1px solid #dbe9f4;
+  border: 1px solid #d8e7f4;
   border-radius: 12px;
-  background: #edf5fb;
+  background: #eaf4fd;
 }
 
 .filter-control button {
-  min-height: 34px;
-  padding: 0 12px;
+  min-height: 44px;
+  padding-inline: 12px;
   border: 0;
   border-radius: 8px;
-  color: #688099;
+  color: #174e80;
   background: transparent;
-  font-size: .75rem;
-  font-weight: 750;
+  font-weight: 700;
   cursor: pointer;
 }
 
 .filter-control button.active {
-  color: #0c64bd;
-  background: white;
-  box-shadow: 0 3px 9px rgba(26, 69, 105, .1);
+  color: white;
+  background: #075cb6;
 }
 
 .number-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 19px;
-  margin: 28px 0 18px;
-  color: #6d8295;
-  font-size: .75rem;
-  font-weight: 600;
+  gap: 12px;
+  margin-block: 18px;
+  color: #385978;
 }
 
 .number-legend span {
@@ -68,120 +57,62 @@
 }
 
 .legend-dot {
-  width: 11px;
-  height: 11px;
+  width: 12px;
+  height: 12px;
+  border: 1px solid #8aa9c4;
   border-radius: 4px;
 }
 
 .legend-dot--available {
-  border: 1px solid #bed6e9;
   background: white;
 }
 
-.legend-dot--selected {
-  background: #1376d3;
-}
-
 .legend-dot--reserved {
-  background: #e4e9ed;
+  background: #dce4eb;
 }
 
 .number-grid {
   display: grid;
-  grid-template-columns: repeat(10, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 58px), 1fr));
+  gap: 7px;
 }
 
 .number-button {
-  aspect-ratio: 1;
-  position: relative;
-  border: 1px solid #d4e5f2;
-  border-radius: 11px;
-  color: #255679;
+  min-height: 46px;
+  padding: 3px;
+  border: 1px solid #b5cce0;
+  border-radius: 9px;
+  color: #174e80;
   background: white;
-  font-size: clamp(.68rem, 1vw, .82rem);
+  font-size: .875rem;
   font-weight: 800;
+  overflow-wrap: anywhere;
   cursor: pointer;
-  box-shadow: 0 3px 8px rgba(20, 65, 104, .035);
-  transition: transform .15s ease, color .15s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease;
 }
 
 .number-button:hover:not(:disabled) {
-  z-index: 1;
-  transform: translateY(-2px);
-  border-color: #2c91ed;
-  color: #0d69c4;
-  box-shadow: 0 6px 14px rgba(12, 103, 190, .14);
+  border-color: #075cb6;
+  color: white;
+  background: #075cb6;
 }
 
-.number-button.selected {
-  border-color: #0d6bc7;
-  color: white;
-  background: linear-gradient(145deg, #1685e8, #0862c1);
-  box-shadow: 0 6px 14px rgba(9, 102, 197, .23);
+.number-button:disabled {
+  cursor: not-allowed;
 }
 
 .number-button.reserved {
-  border-color: #e7ecef;
-  color: #a5b0b9;
-  background: #eef1f3;
+  border-color: #d2dde7;
+  color: #4d6275;
+  background: #e6ecf1;
   text-decoration: line-through;
-  cursor: not-allowed;
-  box-shadow: none;
 }
 
-.number-check {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-}
-
-@media (max-width: 980px) {
-  .raffle-layout {
-    grid-template-columns: minmax(0, 1fr) 270px;
-    gap: 28px;
-  }
-
-  .number-grid {
-    grid-template-columns: repeat(8, 1fr);
-  }
-}
-
-@media (max-width: 760px) {
-  .raffle-section {
-    padding: 57px 0 108px;
-  }
-
-  .raffle-layout {
-    display: block;
-  }
-
-  .section-heading {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
+@media (max-width: 480px) {
   .filter-control {
     width: 100%;
   }
 
   .filter-control button {
     flex: 1;
-  }
-
-  .number-grid {
-    grid-template-columns: repeat(5, 1fr);
-    gap: 7px;
-  }
-
-  .number-button {
-    border-radius: 10px;
-    font-size: .78rem;
-  }
-}
-
-@media (max-width: 420px) {
-  .number-legend {
-    gap: 12px;
   }
 }

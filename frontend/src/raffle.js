@@ -1,18 +1,19 @@
-export const NUMBER_COUNT = 100
-export const PRICE = 5
+const currency = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+})
 
-export const reservedNumbers = new Set([
-  3, 7, 12, 18, 24, 31, 36, 42, 47, 55, 63, 68, 74, 81, 89, 94,
-])
+export const raffleStatuses = {
+  draft: 'Rascunho',
+  open: 'Aberta',
+  closed: 'Aguardando sorteio',
+  drawn: 'Sorteada',
+}
+
+export function formatCurrency(cents) {
+  return currency.format(cents / 100)
+}
 
 export function formatNumber(number) {
   return String(number).padStart(2, '0')
-}
-
-export function formatCurrency(value) {
-  return `R$ ${value.toFixed(2).replace('.', ',')}`
-}
-
-export function formatSelectionCount(count) {
-  return `${count} ${count === 1 ? 'número' : 'números'}`
 }

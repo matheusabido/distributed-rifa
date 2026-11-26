@@ -1,0 +1,102 @@
+.catalog-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.catalog-filters button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid #b7d2eb;
+  border-radius: 999px;
+  color: #174e80;
+  background: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.catalog-filters button[aria-pressed='true'] {
+  border-color: #075cb6;
+  color: white;
+  background: #075cb6;
+}
+
+.raffle-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 275px), 1fr));
+  gap: 16px;
+}
+
+.raffle-card {
+  display: grid;
+  grid-auto-rows: min-content;
+  gap: 12px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid #d8e7f4;
+  border-radius: 18px;
+  color: #12385f;
+  background: white;
+  box-shadow: 0 8px 22px #12385f0d;
+  overflow-wrap: anywhere;
+}
+
+.raffle-card h2 {
+  font-family: 'Nunito', system-ui, sans-serif;
+  line-height: 1.2;
+}
+
+.raffle-card__description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+.raffle-card__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #edf5fc;
+}
+
+.raffle-card__facts dt,
+.raffle-card__progress p {
+  color: #385978;
+  font-size: .87rem;
+}
+
+.raffle-card__facts dd {
+  margin-top: 3px;
+  font-weight: 800;
+}
+
+.raffle-card__progress progress {
+  width: 100%;
+  accent-color: #0866be;
+}
+
+.raffle-status {
+  display: inline-block;
+  width: fit-content;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #26496c;
+  background: #e6eef7;
+  font-size: .83rem;
+  font-weight: 800;
+}
+
+.raffle-status--open {
+  color: #145b43;
+  background: #e0f5eb;
+}
+
+.raffle-status--closed {
+  color: #744c12;
+  background: #fff1d7;
+}

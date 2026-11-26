@@ -1,88 +1,77 @@
 import { useState } from 'react'
-import { formatCurrency, formatNumber, PRICE } from '../raffle.js'
-import Icon from './Icon.jsx'
+import { request } from '../api.js'
+import { formatCurrency, formatNumber } from '../raffle.js'
+import Modal from './Modal.jsx'
 
-function CheckoutConfirmation({ selected, onClose }) {
-  return (
-    <div className="confirmation">
-      <span className="confirmation__icon">
-        <Icon name="check" size={34} />
-      </span>
-      <span className="section-kicker">Simulação concluída</span>
-      <h2 id="checkout-title">Números reservados!</h2>
-      <p>Em uma versão integrada, você receberia agora as instruções de pagamento.</p>
-      <div className="confirmation__numbers">
-        {selected.map(formatNumber).join(', ')}
-      </div>
-      <button
-        type="button"
-        className="button button--primary button--full"
-        onClick={onClose}
-      >
-        Voltar para a rifa
-      </button>
-    </div>
-  )
-}
+export default function CheckoutModal({ raffle, number, unavailable, onResult, onClose }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [confirmed, setConfirmed] = useState(false)
+  const label = formatNumber(number)
 
-export default function CheckoutModal({ selected, onClose }) {
-  const [isConfirmed, setIsConfirmed] = useState(false)
+  async function submit(event) {
+    event.preventDefault()
+    if (busy || unavailable) return
 
-  function handleBackdropClick(event) {
-    if (event.target === event.currentTarget) {
-      onClose()
+    const values = new FormData(event.currentTarget)
+    const nome = values.get('nome').trim()
+    const contato = values.get('contato').trim()
+
+    if (!nome || !contato) {
+      setError('Informe seu nome e contato.')
+      return
+    }
+
+    setBusy(true)
+    setError('')
+
+    try {
+      await request(`/rifas/${raffle.id}/numeros/${number}/comprar`, {
+        method: 'POST',
+        body: { nome, contato },
+      })
+      setConfirmed(true)
+      onResult(number)
+    } catch (error) {
+      setError(error.message)
+      if (error.status === 409) {
+        const numberSold = error.message.toLowerCase().includes('já vendido')
+        onResult(numberSold ? number : null)
+      }
+    } finally {
+      setBusy(false)
     }
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={handleBackdropClick}>
-      <div
-        className="checkout-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="checkout-title"
-      >
-        <button type="button" className="modal-close" onClick={onClose} aria-label="Fechar">
-          <Icon name="close" />
-        </button>
-
-        {isConfirmed ? (
-          <CheckoutConfirmation selected={selected} onClose={onClose} />
-        ) : (
-          <>
-            <span className="section-kicker">Quase lá</span>
-            <h2 id="checkout-title">Revise sua escolha</h2>
-            <p className="modal-intro">
-              Esta é uma demonstração visual. Nenhuma cobrança ou reserva real será feita.
-            </p>
-
-            <div className="modal-numbers">
-              {selected.map((number) => (
-                <span key={number}>{formatNumber(number)}</span>
-              ))}
-            </div>
-            <div className="modal-total">
-              <span>Total da contribuição</span>
-              <strong>{formatCurrency(selected.length * PRICE)}</strong>
-            </div>
-
-            <button
-              type="button"
-              className="button button--primary button--full"
-              onClick={() => setIsConfirmed(true)}
-            >
-              Simular reserva
-            </button>
-            <button
-              type="button"
-              className="button button--ghost button--full"
-              onClick={onClose}
-            >
-              Escolher mais números
-            </button>
-          </>
-        )}
-      </div>
-    </div>
+    <Modal title={confirmed ? 'Compra confirmada' : `Comprar número ${label}`} onClose={onClose} busy={busy}>
+      {confirmed ? (
+        <div className="stacked-form">
+          <p role="status">O número <strong>{label}</strong> foi comprado com sucesso.</p>
+          <button type="button" className="button button--primary" onClick={onClose}>Voltar à rifa</button>
+        </div>
+      ) : (
+        <form className="stacked-form" onSubmit={submit}>
+          <div className="purchase-total">
+            <span>Valor do número</span>
+            <strong>{formatCurrency(raffle.preco_centavos)}</strong>
+          </div>
+          <label>
+            Nome
+            <input name="nome" autoComplete="name" required />
+          </label>
+          <label>
+            Contato
+            <input name="contato" placeholder="Telefone ou e-mail" required />
+          </label>
+          {(error || unavailable) && (
+            <p className="feedback feedback--error" role="alert">{error || unavailable}</p>
+          )}
+          <button type="submit" className="button button--primary" disabled={busy || Boolean(unavailable)}>
+            {busy ? 'Confirmando…' : 'Confirmar compra'}
+          </button>
+        </form>
+      )}
+    </Modal>
   )
 }

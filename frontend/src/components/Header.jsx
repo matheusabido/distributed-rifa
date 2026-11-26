@@ -1,34 +1,34 @@
-import Icon from './Icon.jsx'
 import './Header.css'
 
-export default function Header({ selectedCount, onOpenCart }) {
+export default function Header({ session, onOpenAuth, onSignOut }) {
   return (
     <header className="header">
       <div className="container header__content">
-        <a className="brand" href="#top" aria-label="Rifa do Chico, início">
-          <span className="brand__mark">R</span>
+        <a className="brand" href="#/" aria-label="Rifas UFMT, início">
+          <span className="brand__mark" aria-hidden="true">R</span>
           <span>
-            Rifa do Chico
-            <small>UFMT · Sistemas Distribuídos</small>
+            Rifas UFMT
+            <small>Sistemas Distribuídos</small>
           </span>
         </a>
 
-        <nav aria-label="Navegação principal">
-          <a href="#numeros">Escolher números</a>
-          <a href="#historia">A história</a>
+        <nav className="account-nav" aria-label="Conta">
+          {session ? (
+            <>
+              <a className="button button--primary" href="#/minhas-rifas">Minhas rifas</a>
+              <button type="button" className="button button--ghost" onClick={onSignOut}>Sair</button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="button button--ghost" onClick={() => onOpenAuth('login')}>
+                Entrar
+              </button>
+              <button type="button" className="button button--primary" onClick={() => onOpenAuth('registrar')}>
+                Criar conta
+              </button>
+            </>
+          )}
         </nav>
-
-        <button
-          type="button"
-          className="header__cart"
-          onClick={onOpenCart}
-          disabled={!selectedCount}
-          aria-label={`${selectedCount} números selecionados`}
-        >
-          <Icon name="ticket" size={19} />
-          <span>Minha seleção</span>
-          <b>{selectedCount}</b>
-        </button>
       </div>
     </header>
   )
